@@ -1,0 +1,22 @@
+# Core ML
+torch
+scikit-learn
+pandas
+numpy
+
+# MLOps
+mlflow
+dvc
+# download airflow separately as there are many dependencies
+# apache-airflow==2.8.1
+
+# Serving
+fastapi
+uvicorn
+prometheus-client
+
+# Dev / testing
+pytest
+pytest-cov
+flake8
+pyyaml
