@@ -1,0 +1,35 @@
+schema: '2.0'
+stages:
+  generate_data:
+    cmd: python src/data/generate_data.py --output data/raw/solar_data.csv
+    deps:
+    - path: src/data/generate_data.py
+      hash: md5
+      md5: 39dfa5ffe77d905c7dfd2728963e7c56
+      size: 5040
+    params:
+      params.yaml:
+        data.drift_start_day: 500
+        data.n_days: 730
+    outs:
+    - path: data/raw/solar_data.csv
+      hash: md5
+      md5: 896876ce949d9a3e209c5426e26bef50
+      size: 65232
+  build_features:
+    cmd: python src/data/build_features.py --input data/raw/solar_data.csv 
+      --output data/processed/features.csv
+    deps:
+    - path: data/raw/solar_data.csv
+      hash: md5
+      md5: 896876ce949d9a3e209c5426e26bef50
+      size: 65232
+    - path: src/data/build_features.py
+      hash: md5
+      md5: fa970f709693fceac1c49aa3b1d0b705
+      size: 1934
+    outs:
+    - path: data/processed/features.csv
+      hash: md5
+      md5: 48478895026a945a2bc159fca4457ec3
+      size: 216981

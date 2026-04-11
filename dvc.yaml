@@ -5,19 +5,17 @@ stages:
       - src/data/generate_data.py
     params:
       - params.yaml:
-        - data.n_daus
+        - data.n_days
         - data.drift_start_day
-    out:
+    outs:
       - data/raw/solar_data.csv
   
   build_features:
-    cmd: python src/data/build_features.py 
-        --input data/raw/solar_data.csv 
-        --output data/processed_features.csv
+    cmd: python src/data/build_features.py --input data/raw/solar_data.csv --output data/processed/features.csv
     deps:
       - src/data/build_features.py
-      - data/raw/solar_data.py
-    out:
+      - data/raw/solar_data.csv
+    outs:
       - data/processed/features.csv
   
   train:
@@ -34,14 +32,14 @@ stages:
         - train.test_size
     metrics:
       - metrics.json:
-        cache: false
+          cache: false
     
   evaluate:
     cmd: python src/evaluate/evaluate.py
-    dep:
+    deps:
       - src/evaluate/evaluate.py
       - data/processed/features.csv
     params:
-      - params.yaml
+      - params.yaml:
         - evaluate.mape_threshold
         
