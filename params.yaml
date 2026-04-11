@@ -1,0 +1,45 @@
+data:
+  n_days: 730
+  drift_start_day: 500
+  seed: 42
+
+train:
+  learning_rate: 0.05
+  n_estimators: 300
+  max_depth: 6
+  early_stopping_rounds: 20
+  test_size: 0.2
+  target_col: daily_revenue_usd
+  feature_cols:
+    - ghi
+    - temperature
+    - cloud_cover
+    - effective_ghi
+    - capacity_factor
+    - generation_mwh
+    - ppa_price
+    - spot_price
+    - rec_price
+    - curtailment_fraction
+    - sin_doy
+    - cos_doy
+    - month
+    - ghi_lag1
+    - ghi_lag7
+    - generation_lag1
+    - generation_lag7
+    - spot_price_lag1
+    - spot_price_lag7
+    - ghi_roll7
+    - ghi_roll30
+    - spot_price_roll7
+    - spot_ppa_ratio
+
+evaluate:
+  mape_threshold: 15.0
+  rmse_threshold: 5000.0
+
+serving:
+  model_name: SolarRevenueModel
+  model_stage: Production
+
