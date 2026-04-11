@@ -1,0 +1,47 @@
+stages:
+  generate_data:
+    cmd: python src/data/generate_data.py --output data/raw/solar_data.csv
+    deps:
+      - src/data/generate_data.py
+    params:
+      - params.yaml:
+        - data.n_daus
+        - data.drift_start_day
+    out:
+      - data/raw/solar_data.csv
+  
+  build_features:
+    cmd: python src/data/build_features.py 
+        --input data/raw/solar_data.csv 
+        --output data/processed_features.csv
+    deps:
+      - src/data/build_features.py
+      - data/raw/solar_data.py
+    out:
+      - data/processed/features.csv
+  
+  train:
+    cmd: python src/train/train.py
+    deps:
+      - src/train/train.py
+      - data/processed/features.csv
+    params:
+      - params.yaml:
+        - train.learning_rate
+        - train.n_estimators
+        - train.max_depth
+        - train.early_stopping_rounds
+        - train.test_size
+    metrics:
+      - metrics.json:
+        cache: false
+    
+  evaluate:
+    cmd: python src/evaluate/evaluate.py
+    dep:
+      - src/evaluate/evaluate.py
+      - data/processed/features.csv
+    params:
+      - params.yaml
+        - evaluate.mape_threshold
+        
