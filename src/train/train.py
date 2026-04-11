@@ -13,7 +13,6 @@ Key MLOps patterns demonstrated:
 import json
 import subprocess
 import yaml
-from pathlib import Path
 
 import mlflow
 import mlflow.pytorch
@@ -47,7 +46,7 @@ class SolarSequenceDataset(Dataset):
     
     def __getitem__(self, idx):
         x = self.features[idx: idx + self.seq_len]
-        y = self.targets[idx: self.seq_len]
+        y = self.targets[idx + self.seq_len]
         return x, y
     
 # LSTM model
@@ -60,7 +59,7 @@ class SolarRevenueLSTM(nn.Module):
     """
     def __init__(self, input_size:int, hidden_size:int,
                  num_layers:int, dropout:float):
-        super.__init__()
+        super().__init__()
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -79,7 +78,7 @@ class SolarRevenueLSTM(nn.Module):
     def forward(self, x):
         # x: (batch, seq_len, input_size)
         lstm_out, _ = self.lstm(x) # (batch, seq_len, hidden_size)
-        last_hidden = lstm_out[:, -1. :]
+        last_hidden = lstm_out[:, -1, :]
         last_hidden = self.dropout(last_hidden)
         return self.fc(last_hidden).squeeze(-1)
     
@@ -93,7 +92,7 @@ class LSTMWrapper(mlflow.pyfunc.PythonModel):
     it just calls model.predict(df) the same way as any other MLflow model.
     """
     def __init__(self, model: SolarRevenueLSTM, scaler: StandardScaler,
-                 seq_len: int, feature_cols: int):
+                 seq_len: int, feature_cols: list[str]):
         self.model = model
         self.scaler = scaler
         self.seq_len = seq_len
@@ -104,6 +103,8 @@ class LSTMWrapper(mlflow.pyfunc.PythonModel):
         model_input: DataFrame with exactly seq_len rows of features.
         Returns: array of shape (1,) — predicted revenue for the next day.
         """
+        if len(model_input) != self.seq_len:
+            raise ValueError(f"Expected {self.seq_len} rows, got {len(model_input)}")
         features = model_input[self.feature_cols].values
         scaled = self.scaler.transform(features)
         x = torch.FloatTensor(scaled).unsqueeze(0) # (1, seq_len, n_features)
@@ -118,7 +119,7 @@ class LSTMWrapper(mlflow.pyfunc.PythonModel):
 def get_git_commit() -> str:
     try:
         return subprocess.check_output(
-            ["git", "rev-parse","HEAD"], strerr = subprocess.DEVNULL
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
         ).decode().strip()[:8]
     except Exception:
         return "unknown"
@@ -192,9 +193,12 @@ def train_model():
     criterion = nn.MSELoss()
 
     # MLFlow run
+    # 1. Set Experiment
     mlflow.set_experiment("solar-revenue-forecasting")
-
+    mlflow.pytorch.autolog(log_models=False)
+    # 2. Start Run
     with mlflow.start_run(run_name=f"lstm-h{cfg['hidden_size']}-l{cfg['num_layers']}"):
+        # 3. Log static params once
         mlflow.log_params({
             "model_type": "LSTM",
             "seq_len": cfg["seq_len"],
@@ -212,10 +216,12 @@ def train_model():
         })
         
         # Training Loop
+        # track best checkpoint
         best_val_loss = float("inf")
-        best_state = None
+        best_state = None 
         patience_counter = 0
 
+        # 4. Training Phase
         for epoch in range(cfg['epochs']):
             # Train
             model.train()
@@ -244,20 +250,23 @@ def train_model():
             val_loss = np.mean(val_losses)
             current_lr = optimizer.param_groups[0]["lr"]
 
+            # 5. Log step metrics for each epoch
             mlflow.log_metrics({
                 "train_loss" : train_loss,
                 "val_loss" : val_loss,
                 "learning_rate" : current_lr
             }, step=epoch)
-
+            
+            # 6. Set Scheduler
             scheduler.step(val_loss)
 
-            # Early stopping
+            
+            # track and update the best checkpoint in memory
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                 patience_counter = 0
-            else:
+            else: # Early stopping
                 patience_counter += 1
                 if patience_counter >= cfg["early_stopping_patience"]:
                     print(f"Early stopping at epoch {epoch + 1}")
@@ -266,57 +275,61 @@ def train_model():
             if (epoch + 1) % 5 == 0:
                 print(f"Epoch {epoch+1:3d} | train_loss={train_loss:.4f} "
                       f"| val_loss={val_loss:.4f} | lr={current_lr:.6f}")
-                
+
+        # Restore best weights once after training loop.
+        if best_state is not None:
             model.load_state_dict(best_state)
 
-            # Compute interpretable metrics on original scale
-            model.eval()
-            all_preds, all_targets = [], []
-            with torch.no_grad():
-                for X_batch, y_batch in val_loader:
-                    preds = model(X_batch.to(device), y_batch.to(device))
-                    all_preds.append(preds)
-                    all_targets.append(y_batch.numpy())
+        # Compute interpretable metrics on original scale
+        model.eval()
+        all_preds, all_targets = [], []
+        with torch.no_grad():
+            for X_batch, y_batch in val_loader:
+                preds = model(X_batch.to(device))
+                all_preds.append(preds.cpu().numpy())
+                all_targets.append(y_batch.numpy())
 
-            preds_scaled = np.concatenate(all_preds)
-            target_scaled = np.concatenate(all_targets)
+        preds_scaled = np.concatenate(all_preds)
+        target_scaled = np.concatenate(all_targets)
 
-            # Inverse-transform to USD
-            preds_usd = preds_scaled * y_std + y_mean
-            targets_usd = target_scaled * y_std + y_mean
+        # Inverse-transform to USD
+        preds_usd = preds_scaled * y_std + y_mean
+        targets_usd = target_scaled * y_std + y_mean
 
-            val_mape = mape(targets_usd, preds_usd)
-            val_rmse = rmse(targets_usd, preds_usd)
-            val_r2   = float(1 - np.sum((targets_usd - preds_usd)**2) /
-                                np.sum((targets_usd - targets_usd.mean())**2))
+        val_mape = mape(targets_usd, preds_usd)
+        val_rmse = rmse(targets_usd, preds_usd)
+        val_r2 = float(
+            1 - np.sum((targets_usd - preds_usd) ** 2) /
+            np.sum((targets_usd - targets_usd.mean()) ** 2)
+        )
+        
+        # log final metrics
+        mlflow.log_metrics({
+            "val_mape": val_mape,
+            "val_rmse": val_rmse,
+            "val_r2": val_r2,
+            "best_val_loss": best_val_loss,
+        })
+        print(f"\nFinal - val_mape={val_mape:.2f}% | val_rmse=${val_rmse:,.0f} | val_r2={val_r2:.3f}")
 
-            mlflow.log_metrics({
-                "val_mape": val_mape,
-                "val_rmse": val_rmse,
-                "val_r2":   val_r2,
-                "best_val_loss": best_val_loss,
-            })
-            print(f"\nFinal — val_mape={val_mape:.2f}% | val_rmse=${val_rmse:,.0f} | val_r2={val_r2:.3f}")
+        # Log model via pyfunc wrapper
+        # Logging Artifacts using a 
+        wrapper = LSTMWrapper(model.cpu(), scaler, cfg["seq_len"], feature_cols)
+        mlflow.pyfunc.log_model(
+            artifact_path="model",
+            python_model=wrapper,
+            pip_requirements=["torch==2.2.0", "scikit-learn==1.4.0",
+                              "pandas==2.1.4", "numpy==1.26.3"],
+        )
 
-            # Log model via pyfunc wrapper
-            # This is key: the LSTMWrapper makes the model registry-compatible
-            # with the same .predict(df) interface as any other MLflow model
-            wrapper = LSTMWrapper(model.cpu(), scaler, cfg["seq_len"], feature_cols)
-            mlflow.pyfunc.log_model(
-                artifact_path="model",
-                python_model=wrapper,
-                pip_requirements=["torch==2.2.0", "scikit-learn==1.4.0",
-                                  "pandas==2.1.4", "numpy==1.26.3"],
-            )
+        # Write metrics.json for DVC
+        metrics = {"val_mape": val_mape, "val_rmse": val_rmse, "val_r2": val_r2}
+        with open("metrics.json", "w") as f:
+            json.dump(metrics, f, indent=2)
 
-            # Write metrics.json for DVC
-            metrics = {"val_mape": val_mape, "val_rmse": val_rmse, "val_r2": val_r2}
-            with open("metrics.json", "w") as f:
-                json.dump(metrics, f, indent=2)
-
-            run_id = mlflow.active_run().info.run_id
-            print(f"Run ID: {run_id}")
-            return run_id, val_mape
+        run_id = mlflow.active_run().info.run_id
+        print(f"Run ID: {run_id}")
+        return run_id, val_mape
         
 
 if __name__ == "__main__":
