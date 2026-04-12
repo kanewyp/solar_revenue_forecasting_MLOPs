@@ -25,11 +25,20 @@ stages:
       - data/processed/features.csv
     params:
       - params.yaml:
+        - train.seq_len
+        - train.hidden_size
+        - train.num_layers
+        - train.dropout
+        - train.batch_size
+        - train.epochs
         - train.learning_rate
-        - train.n_estimators
-        - train.max_depth
-        - train.early_stopping_rounds
+        - train.lr_patience
+        - train.lr_factor
+        - train.early_stopping_patience
+        - train.grad_clip
         - train.test_size
+        - train.target_col
+        - train.feature_cols
     metrics:
       - metrics.json:
           cache: false
@@ -42,4 +51,7 @@ stages:
     params:
       - params.yaml:
         - evaluate.mape_threshold
+        - evaluate.rmse_threshold
+        - serving.model_name
+        - serving.model_stage
         

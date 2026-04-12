@@ -132,7 +132,13 @@ def get_git_commit() -> str:
         return "unknown"
 
 def mape(y_true, y_pred) -> float:
-    return float(mean_absolute_percentage_error(y_true, y_pred) * 100)
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    # MAPE is undefined at/near zero; filter tiny targets to avoid blow-ups.
+    mask = np.abs(y_true) > 1e-6
+    if not np.any(mask):
+        return float("nan")
+    return float(mean_absolute_percentage_error(y_true[mask], y_pred[mask]) * 100)
 
 def rmse(y_true, y_pred) -> float:
     return float(np.sqrt(mean_squared_error(y_true, y_pred)))
