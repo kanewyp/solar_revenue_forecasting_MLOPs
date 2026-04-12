@@ -188,7 +188,7 @@ def train_model():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, patience=cfg["lr_patience"], factor=cfg["lr_factor"], verbose=True
+        optimizer, patience=cfg["lr_patience"], factor=cfg["lr_factor"]
     )
     criterion = nn.MSELoss()
 

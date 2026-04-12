@@ -4,11 +4,25 @@ data:
   seed: 42
 
 train:
-  learning_rate: 0.05
-  n_estimators: 300
-  max_depth: 6
-  early_stopping_rounds: 20
+  # Sequence config
+  seq_len: 30            # lookback window: use last 30 days to predict day 31
   test_size: 0.2
+
+  # Model architecture
+  input_size: 23         # must match len(feature_cols)
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.2
+
+  # Training
+  batch_size: 32
+  epochs: 50
+  learning_rate: 0.001
+  lr_patience: 5         # reduce LR if val loss doesn't improve for 5 epochs
+  lr_factor: 0.5
+  early_stopping_patience: 10
+  grad_clip: 1.0         # prevent exploding gradients
+
   target_col: daily_revenue_usd
   feature_cols:
     - ghi
