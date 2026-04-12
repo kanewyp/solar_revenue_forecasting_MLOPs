@@ -1,0 +1,92 @@
+name: CI — Solar MLOps Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint (flake8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+      - run: pip install flake8
+      - run: flake8 src/ tests/ --max-line-length=100 --ignore=E501,W503
+
+  test:
+    name: Unit tests + data validation
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Generate test data
+        run: python src/data/generate_data.py --n-days 200 --output data/raw/solar_data.csv
+      - name: Build test features
+        run: python src/data/build_features.py
+      - name: Run tests with coverage
+        run: pytest tests/ --cov=src --cov-report=term-missing -v
+
+  train-validate:
+    name: Train + validate model quality gate
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Prepare data
+        run: |
+          python src/data/generate_data.py --n-days 200 --output data/raw/solar_data.csv
+          python src/data/build_features.py
+      - name: Train model
+        run: python src/train/train.py
+        env:
+          MLFLOW_TRACKING_URI: ./mlruns   # local file-based tracking in CI
+      - name: Check metrics threshold
+        run: |
+          python -c "
+          import json
+          with open('metrics.json') as f:
+              m = json.load(f)
+          print(f'MAPE: {m[\"val_mape\"]:.2f}%')
+          assert m['val_mape'] < 20.0, f'MAPE too high: {m[\"val_mape\"]:.2f}%'
+          print('Metric gate PASSED.')
+          "
+
+  build-docker:
+    name: Build serving Docker image
+    runs-on: ubuntu-latest
+    needs: train-validate
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: |
+          docker build -f docker/serving.Dockerfile -t solar-revenue-api:${{ github.sha }} .
+          echo "Image built: solar-revenue-api:${{ github.sha }}"

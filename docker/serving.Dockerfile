@@ -3,7 +3,7 @@
 # CI/CD can explicitly choose which image to build -> team members instantly understand intent by filename
 
 
-FROM python: 3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
@@ -22,4 +22,4 @@ COPY params.yaml .
 
 EXPOSE 8000
 
-CMD ["unicorn", "src.serving.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.serving.app:app", "--host", "0.0.0.0", "--port", "8000"]

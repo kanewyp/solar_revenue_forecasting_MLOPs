@@ -11,6 +11,7 @@ Key MLOps patterns demonstrated:
   - Saves model as mlflow.pytorch artifact for registry
 """
 import json
+import os
 import subprocess
 import yaml
 
@@ -100,11 +101,17 @@ class LSTMWrapper(mlflow.pyfunc.PythonModel):
 
     def predict(self, context, model_input: pd.DataFrame) -> np.ndarray:
         """
-        model_input: DataFrame with exactly seq_len rows of features.
+        model_input: DataFrame with either:
+          - exactly seq_len rows of features, or
+          - a single row (replicated to seq_len for convenience in online serving).
         Returns: array of shape (1,) — predicted revenue for the next day.
         """
-        if len(model_input) != self.seq_len:
-            raise ValueError(f"Expected {self.seq_len} rows, got {len(model_input)}")
+        if len(model_input) == 1:
+            # Convenience path for online serving when only current-day features are sent.
+            model_input = pd.concat([model_input] * self.seq_len, ignore_index=True)
+        elif len(model_input) != self.seq_len:
+            raise ValueError(f"Expected 1 or {self.seq_len} rows, got {len(model_input)}")
+
         features = model_input[self.feature_cols].values
         scaled = self.scaler.transform(features)
         x = torch.FloatTensor(scaled).unsqueeze(0) # (1, seq_len, n_features)
@@ -136,6 +143,9 @@ def train_model():
     with open("params.yaml") as f:
         config = yaml.safe_load(f)
     cfg = config['train']
+
+    # Keep training runs on the same tracking backend used by serving/registry.
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5001"))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training on: {device}")
@@ -315,11 +325,16 @@ def train_model():
         # Log model via pyfunc wrapper
         # Logging Artifacts using a 
         wrapper = LSTMWrapper(model.cpu(), scaler, cfg["seq_len"], feature_cols)
+        model_requirements = [
+            f"torch=={torch.__version__.split('+')[0]}",
+            f"scikit-learn=={__import__('sklearn').__version__}",
+            f"pandas=={pd.__version__}",
+            f"numpy=={np.__version__}",
+        ]
         mlflow.pyfunc.log_model(
             artifact_path="model",
             python_model=wrapper,
-            pip_requirements=["torch==2.2.0", "scikit-learn==1.4.0",
-                              "pandas==2.1.4", "numpy==1.26.3"],
+            pip_requirements=model_requirements,
         )
 
         # Write metrics.json for DVC

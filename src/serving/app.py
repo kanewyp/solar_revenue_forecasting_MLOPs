@@ -70,7 +70,7 @@ def predict(request: PredictionRequest):
         REQUEST_COUNT.labels(status="200").inc()
         return {"predicted_revenue_usd": round(prediction, 2)}
     except Exception as e:
-        REQUEST_COUNT.label(status="500").inc()
+        REQUEST_COUNT.labels(status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         REQUEST_LATENCY.observe(time.time() - start)

@@ -1,18 +1,14 @@
-version: "3.9"
-
 services:
   mlflow:
     image: python:3.11-slim
     command: >
-      bash -c "pip install mlflow && mlflow server
-        --host 0.0.0.0 --port 5001
-        --backend-store-uri sqlite:///mlruns/mlflow.db"
+      bash -c "pip install mlflow && mlflow server --host 0.0.0.0 --port 5001 --backend-store-uri sqlite:///mlruns/mlflow.db --allowed-hosts '*' --cors-allowed-origins '*'"
     ports:
       - "5001:5001"
     volumes:
       - ./mlruns:/mlruns
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -32,7 +28,7 @@ services:
       mlflow:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 3
